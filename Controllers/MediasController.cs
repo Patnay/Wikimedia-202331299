@@ -1,0 +1,169 @@
+using DAL;
+using Models;
+using System.Collections.Generic;
+using System.Linq;
+using System.Web.Mvc;
+using static Controllers.AccessControl;
+
+public class MediasController : Controller
+{
+    private void InitSessionVariables()
+    {
+        if (Session["CurrentMediaId"] == null) Session["CurrentMediaId"] = 0;
+        if (Session["CurrentMediaTitle"] == null) Session["CurrentMediaTitle"] = "";
+        if (Session["Search"] == null) Session["Search"] = false;
+        if (Session["SearchString"] == null) Session["SearchString"] = "";
+        if (Session["SelectedCategory"] == null) Session["SelectedCategory"] = "";
+        if (Session["Categories"] == null) Session["Categories"] = DB.Medias.MediasCategories();
+        if (Session["SortByTitle"] == null) Session["SortByTitle"] = true;
+        if (Session["SortAscending"] == null) Session["SortAscending"] = true;
+        ValidateSelectedCategory();
+    }
+
+    private void ResetCurrentMediaInfo()
+    {
+        Session["CurrentMediaId"] = 0;
+        Session["CurrentMediaTitle"] = "";
+    }
+
+    private void ValidateSelectedCategory()
+    {
+        if (Session["SelectedCategory"] != null)
+        {
+            var selectedCategory = (string)Session["SelectedCategory"];
+            var medias = DB.Medias.ToList().Where(c => c.Category == selectedCategory);
+            if (!medias.Any()) Session["SelectedCategory"] = "";
+        }
+    }
+
+    [UserAccess(Access.View)]
+    public ActionResult GetMediasCategoriesList(bool forceRefresh = false)
+    {
+        try
+        {
+            InitSessionVariables();
+            bool search = (bool)Session["Search"];
+            if (search) return PartialView();
+            return null;
+        }
+        catch (System.Exception ex)
+        {
+            return Content("Erreur interne" + ex.Message, "text/html");
+        }
+    }
+
+    [UserAccess(Access.View)]
+    public ActionResult GetMedias(bool forceRefresh = false)
+    {
+        try
+        {
+            IEnumerable<Media> result = null;
+            if (DB.Medias.HasChanged || forceRefresh)
+            {
+                InitSessionVariables();
+                bool search = (bool)Session["Search"];
+                string searchString = (string)Session["SearchString"];
+                if (search)
+                {
+                    result = DB.Medias.ToList().Where(c => c.Title.ToLower().Contains(searchString)).OrderBy(c => c.Title);
+                    string selectedCategory = (string)Session["SelectedCategory"];
+                    if (selectedCategory != "") result = result.Where(c => c.Category == selectedCategory);
+                }
+                else result = DB.Medias.ToList();
+                if ((bool)Session["SortAscending"])
+                    result = (bool)Session["SortByTitle"] ? result.OrderBy(c => c.Title) : result.OrderBy(c => c.PublishDate);
+                else
+                    result = (bool)Session["SortByTitle"] ? result.OrderByDescending(c => c.Title) : result.OrderByDescending(c => c.PublishDate);
+                return PartialView(result);
+            }
+            return null;
+        }
+        catch (System.Exception ex)
+        {
+            return Content("Erreur interne" + ex.Message, "text/html");
+        }
+    }
+
+    [UserAccess(Access.View)] public ActionResult List() { ResetCurrentMediaInfo(); return View(); }
+    [UserAccess(Access.View)] public ActionResult ToggleSearch() { if (Session["Search"] == null) Session["Search"] = false; Session["Search"] = !(bool)Session["Search"]; return RedirectToAction("List"); }
+    [UserAccess(Access.View)] public ActionResult SortByTitle() { Session["SortByTitle"] = true; return RedirectToAction("List"); }
+    [UserAccess(Access.View)] public ActionResult ToggleSort() { Session["SortAscending"] = !(bool)Session["SortAscending"]; return RedirectToAction("List"); }
+    [UserAccess(Access.View)] public ActionResult SortByDate() { Session["SortByTitle"] = false; return RedirectToAction("List"); }
+    [UserAccess(Access.View)] public ActionResult SetSearchString(string value) { Session["SearchString"] = (value ?? "").ToLower(); return RedirectToAction("List"); }
+    [UserAccess(Access.View)] public ActionResult SetSearchCategory(string value) { Session["SelectedCategory"] = value; return RedirectToAction("List"); }
+    [UserAccess(Access.View)] public ActionResult About() { return View(); }
+
+    [UserAccess(Access.View)]
+    public ActionResult Details(int id)
+    {
+        Session["CurrentMediaId"] = id;
+        Media media = DB.Medias.Get(id);
+        if (media != null)
+        {
+            Session["CurrentMediaTitle"] = media.Title;
+            return View(media);
+        }
+        return RedirectToAction("List");
+    }
+
+    [UserAccess(Access.View)]
+    public ActionResult GetMediaDetails(int id, bool forceRefresh = false)
+    {
+        Session["CurrentMediaId"] = id;
+        Media media = DB.Medias.Get(id);
+        if (media == null) return RedirectToAction("List");
+        Session["CurrentMediaTitle"] = media.Title;
+        if (DB.Medias.HasChanged || forceRefresh) return PartialView(media);
+        return null;
+    }
+
+    [UserAccess(Access.Write)] public ActionResult Create() { return View(new Media()); }
+
+    [UserAccess(Access.Write)]
+    [HttpPost]
+    [ValidateAntiForgeryToken()]
+    public ActionResult Create(Media media) { DB.Medias.Add(media); return RedirectToAction("List"); }
+
+    [UserAccess(Access.Write)]
+    public ActionResult Edit()
+    {
+        int id = Session["CurrentMediaId"] != null ? (int)Session["CurrentMediaId"] : 0;
+        if (id != 0)
+        {
+            Media media = DB.Medias.Get(id);
+            if (media != null) return View(media);
+        }
+        return RedirectToAction("List");
+    }
+
+    [UserAccess(Access.Write)]
+    [HttpPost]
+    [ValidateAntiForgeryToken()]
+    public ActionResult Edit(Media media)
+    {
+        int id = Session["CurrentMediaId"] != null ? (int)Session["CurrentMediaId"] : 0;
+        Media storedMedia = DB.Medias.Get(id);
+        if (storedMedia != null)
+        {
+            media.Id = id;
+            media.PublishDate = storedMedia.PublishDate;
+            DB.Medias.Update(media);
+        }
+        return RedirectToAction("Details", new { id });
+    }
+
+    [UserAccess(Access.Write)]
+    public ActionResult Delete()
+    {
+        int id = Session["CurrentMediaId"] != null ? (int)Session["CurrentMediaId"] : 0;
+        if (id != 0) DB.Medias.Delete(id);
+        return RedirectToAction("List");
+    }
+
+    [UserAccess(Access.Write)]
+    public JsonResult CheckConflict(string YoutubeId)
+    {
+        int id = Session["CurrentMediaId"] != null ? (int)Session["CurrentMediaId"] : 0;
+        return Json(DB.Medias.ToList().Where(c => c.YoutubeId == YoutubeId && c.Id != id).Any(), JsonRequestBehavior.AllowGet);
+    }
+}
